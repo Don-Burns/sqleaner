@@ -37,9 +37,9 @@ warn_return_any = true
 no_implicit_reexport = true
 strict_equality = true
 extra_checks = true
-# others opts
-explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["test"]
+module = ["test.*"]
+# so we don't need to type all our test with `-> None`
 disallow_untyped_defs = false
+disallow_incomplete_defs = false
