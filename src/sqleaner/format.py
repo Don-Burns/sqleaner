@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Iterable, Optional, Type, TypeGuard, TypeVar
 
 import sqlglot
 import sqlglot.expressions as expressions
@@ -98,6 +98,34 @@ def __format_select(
     # from clause
     from_clause = exp.args.get("from")
     if from_clause is not None and isinstance(from_clause, expressions.From):
-        formatted_exp += f"\nFROM {from_clause.name}"
+        from_sql = from_clause.sql()
+        formatted_exp += f"\n{from_sql}"
+
+    # join clauses
+    join_clauses = exp.args.get("joins")
+    if join_clauses is not None and check_all_of_type(join_clauses, expressions.Join):
+        joins: list[str] = []
+        for join in join_clauses:
+            join_sql = join.sql()
+            joins.append(join_sql)
+        join_str = "\n".join(joins)
+        formatted_exp += f"\n{join_str}"
 
     return formatted_exp
+
+
+T = TypeVar("T")
+
+
+def check_all_of_type(iterable: Iterable[object], t: Type[T]) -> TypeGuard[Iterable[T]]:
+    """
+    To type check an iterable of objects and make sure they match a given type.
+
+    Args:
+        iterable (Iterable[object]): iterable of objects to type check
+        t (Type[T]): type to check against
+
+    Returns:
+        TypeGuard[Iterable[T]]: True if all items in iterable are of type t else False
+    """
+    return all((isinstance(item, t) for item in iterable))

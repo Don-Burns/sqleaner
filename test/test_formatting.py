@@ -34,7 +34,12 @@ class TestInOut:
 
     @pytest.mark.parametrize(
         argnames="file_category",
-        argvalues=("single_col", "multiple_cols", "function_calls"),
+        argvalues=(
+            "single_col",
+            "multiple_cols",
+            "function_calls",
+            "join",
+        ),
     )
     def test_formatting(self, file_category: str):
         input_str = self.read_input_file(file_category)
