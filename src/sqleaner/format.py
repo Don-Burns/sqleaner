@@ -1,8 +1,11 @@
-from enum import Enum
-import sqlglot
-from sqlglot.tokens import Tokenizer
-import sqlglot.expressions as expressions
 import logging
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+
+import sqlglot
+import sqlglot.expressions as expressions
+from sqlglot.tokens import Tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,12 @@ class ExpressionType(Enum):
         expressions.Update,
         expressions.Delete,
     ]
+
+
+@dataclass(slots=True)
+class ColumnBlock:
+    identifier: str
+    alias: Optional[str] = None
 
 
 def format_sql(sql_str: str) -> str:
@@ -80,7 +89,11 @@ def __format_select(
     # add newline for multiple column select with indent for first column
     if len(exp.named_selects) > 1:
         formatted_exp += f"\n{indentation_chars}"
-    formatted_exp += col_sep.join(col for col in exp.named_selects)
+    col_strings: list[str] = []
+    for col in exp.selects:
+        col_str = col.sql()
+        col_strings.append(col_str)
+    formatted_exp += col_sep.join((col for col in col_strings))
 
     # from clause
     from_clause = exp.args.get("from")

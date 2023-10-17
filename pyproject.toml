@@ -18,7 +18,7 @@ line-length = 88
 
 [tool.isort]
 profile = "black"
-include_trailing_comman = true
+include_trailing_comma = true
 
 [tool.mypy]
 files = ["src", "test"]
