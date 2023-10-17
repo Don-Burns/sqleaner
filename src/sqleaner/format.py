@@ -32,10 +32,7 @@ class ColumnBlock:
 
 
 def format_sql(sql_str: str) -> str:
-    tokenizer = Tokenizer()
-    tokens = tokenizer.tokenize(sql_str)
-    parser = sqlglot.Parser()
-    parsed = parser.parse(tokens)
+    parsed = _parse_statement(sql_str)
     output: list[str] = []
     base_col_sep = ","
     expression_ending = "\n;"
@@ -47,6 +44,7 @@ def format_sql(sql_str: str) -> str:
         indent_chars = " " * 4 * (indent_level + 1)
         col_sep = f"\n{indent_chars}{base_col_sep} "
         logger.debug("current expression: %s", exp)
+        # TODO start using the walk/dfs methods to iterate over the AST instead of manually handling each expression type
         match exp:
             case _ if isinstance(exp, expressions.Select):
                 formatted_exp = __format_select(exp, col_sep, indent_chars)
@@ -56,6 +54,15 @@ def format_sql(sql_str: str) -> str:
         # add ending e.g. semi-colon
         formatted_exp += expression_ending
         output.append(formatted_exp)
+        # check the ast has not changes post formatting
+        formatted_ast_expressions = _parse_statement(formatted_exp)
+        if len(formatted_ast_expressions) != 1:
+            raise RuntimeError(
+                "Received multiple statements from parsing formatted AST"
+            )
+        formatted_ast = formatted_ast_expressions[0]
+        if exp != formatted_ast:
+            raise RuntimeError("AST has changed post formatting")
         del formatted_exp
 
     #     for node in exp.dfs():
@@ -65,7 +72,25 @@ def format_sql(sql_str: str) -> str:
     #     for current, prev, key in exp.dfs()
     # ]
 
-    return "".join(output) + "\n"  # add newline at end of file
+    # join it all back to together and add newline to end of query
+    return "".join(output) + "\n"
+
+
+def _parse_statement(sql_str: str) -> list[expressions.Expression | None]:
+    """
+    Func to parse a sql statement into an AST.
+
+    Args:
+        sql_str (str): sql statement to parse
+
+    Returns:
+        list[expressions.Expression | None]: sql AST
+    """
+    tokenizer = Tokenizer()
+    tokens = tokenizer.tokenize(sql_str)
+    parser = sqlglot.Parser()
+    parsed = parser.parse(tokens)
+    return parsed
 
 
 def __format_select(
