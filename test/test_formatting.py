@@ -39,6 +39,8 @@ class TestInOut:
             "multiple_cols",
             "function_calls",
             "join",
+            "cte_single_with",
+            "cte_multiple_with",
         ),
     )
     def test_formatting(self, file_category: str):

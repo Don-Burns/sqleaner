@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Optional, Type, TypeGuard, TypeVar
+from typing import Iterable, Optional, Sequence, Type, TypeGuard, TypeVar
 
 import sqlglot
 import sqlglot.expressions as expressions
@@ -31,23 +31,27 @@ class ColumnBlock:
     alias: Optional[str] = None
 
 
+def calc_indentation_chars(indent_level: int) -> str:
+    return " " * 4 * (indent_level)
+
+
+def calc_column_separator(indent_level: int, col_sep: str) -> str:
+    return f"\n{calc_indentation_chars(indent_level)}{col_sep} "
+
+
 def format_sql(sql_str: str) -> str:
-    parsed = _parse_statement(sql_str)
+    parsed = __parse_statement(sql_str)
     output: list[str] = []
-    base_col_sep = ","
     expression_ending = "\n;"
-    indent_level = 0
     for exp in parsed:
         if exp is None:
             continue
         # set indentation
-        indent_chars = " " * 4 * (indent_level + 1)
-        col_sep = f"\n{indent_chars}{base_col_sep} "
         logger.debug("current expression: %s", exp)
         # TODO start using the walk/dfs methods to iterate over the AST instead of manually handling each expression type
         match exp:
             case _ if isinstance(exp, expressions.Select):
-                formatted_exp = __format_select(exp, col_sep, indent_chars)
+                formatted_exp = format_select_expression(exp)
             case _:
                 raise NotImplementedError(f"Expression handling not implemented: {exp}")
 
@@ -55,7 +59,7 @@ def format_sql(sql_str: str) -> str:
         formatted_exp += expression_ending
         output.append(formatted_exp)
         # check the ast has not changes post formatting
-        formatted_ast_expressions = _parse_statement(formatted_exp)
+        formatted_ast_expressions = __parse_statement(formatted_exp)
         if len(formatted_ast_expressions) != 1:
             raise RuntimeError(
                 "Received multiple statements from parsing formatted AST"
@@ -65,18 +69,11 @@ def format_sql(sql_str: str) -> str:
             raise RuntimeError("AST has changed post formatting")
         del formatted_exp
 
-    #     for node in exp.dfs():
-    #         logger.debug("current node: %s", node)
-    # dfs = [
-    #     {"current": current, "previous": prev, "key": key}
-    #     for current, prev, key in exp.dfs()
-    # ]
-
     # join it all back to together and add newline to end of query
     return "".join(output) + "\n"
 
 
-def _parse_statement(sql_str: str) -> list[expressions.Expression | None]:
+def __parse_statement(sql_str: str) -> list[expressions.Expression | None]:
     """
     Func to parse a sql statement into an AST.
 
@@ -89,31 +86,50 @@ def _parse_statement(sql_str: str) -> list[expressions.Expression | None]:
     tokenizer = Tokenizer()
     tokens = tokenizer.tokenize(sql_str)
     parser = sqlglot.Parser()
-    parsed = parser.parse(tokens)
+    parsed = parser.parse(tokens, sql_str)
     return parsed
 
 
-def __format_select(
-    exp: expressions.Select, col_sep: str, indentation_chars: str
-) -> str:
+def format_select_expression(exp: expressions.Select) -> str:
+    formatted_exp = ""
+    ctes = exp.ctes
+    column_separator = ","
+    indent_level = 0
+    if (
+        ctes is not None
+        # ensure ctes is list as expected
+        and isinstance(ctes, list)
+        and len(ctes) > 0
+        # ensure ctes is a list of CTEs expressions
+        and check_all_of_type(ctes, expressions.CTE)
+    ):
+        formatted_exp += f"{__with_statements(ctes, column_separator)}\n"
+    formatted_exp += __format_select(exp, column_separator, indent_level)
+    return formatted_exp
+
+
+def __format_select(exp: expressions.Select, col_sep: str, indent_level: int) -> str:
     """
     Func to take a select expression and format it into a string.
 
     Args:
         exp (expressions.Select): expression to format in AST form
         col_sep (str): column separator for cols in select statement
-        indentation_chars (str): characters to use for indentation
+        indent_level (int): indentation level for select statement
 
     Returns:
         str: formatted string
     """
-    formatted_exp = "SELECT"
+    base_indent = calc_indentation_chars(indent_level)
+    col_indent = calc_indentation_chars(indent_level + 1)
+    col_sep = calc_column_separator(indent_level + 1, col_sep)
+    formatted_exp = f"{base_indent}SELECT"
     # add space for single column select
     if len(exp.named_selects) == 1:
         formatted_exp += " "
     # add newline for multiple column select with indent for first column
     if len(exp.named_selects) > 1:
-        formatted_exp += f"\n{indentation_chars}"
+        formatted_exp += f"\n{col_indent}"
     col_strings: list[str] = []
     for col in exp.selects:
         col_str = col.sql()
@@ -124,7 +140,7 @@ def __format_select(
     from_clause = exp.args.get("from")
     if from_clause is not None and isinstance(from_clause, expressions.From):
         from_sql = from_clause.sql()
-        formatted_exp += f"\n{from_sql}"
+        formatted_exp += f"\n{base_indent}{from_sql}"
 
     # join clauses
     join_clauses = exp.args.get("joins")
@@ -132,10 +148,56 @@ def __format_select(
         joins: list[str] = []
         for join in join_clauses:
             join_sql = join.sql()
+            # add indent to each line
+            join_sql = f"{base_indent}{join_sql}"
             joins.append(join_sql)
         join_str = "\n".join(joins)
         formatted_exp += f"\n{join_str}"
 
+    return formatted_exp
+
+
+def __with_statements(exps: Iterable[expressions.CTE], col_sep: str) -> str:
+    """
+    goal is statement like:
+    ```
+    WITH cte AS (
+        ...
+    ),
+    cte2 AS (
+        ...
+    )
+    ...
+
+
+    Args:
+        exps (Iterable[expressions.CTE]):
+        col_sep (str): column separator for cols in select statement
+
+    Returns:
+        str: formatted ctes
+    """
+    # since all selects are within a set of brackets at least
+    indent_level = 1
+
+    formatted_exp = "WITH "
+    formatted_ctes: list[str] = []
+    for cte in exps:
+        # target = `cte AS (...)`
+        # build line with alias + opening bracket
+        opening_clause = cte.alias + " AS ("
+        # format the select within brackets
+        select_statement = __format_select(
+            cte.this,
+            col_sep=col_sep,
+            indent_level=indent_level,
+        )
+        # close brackets
+        closing_clause = ")"
+        formatted_cte = f"{opening_clause}\n{select_statement}\n{closing_clause}"
+        formatted_ctes.append(formatted_cte)
+
+    formatted_exp += ",\n".join(formatted_ctes)
     return formatted_exp
 
 
