@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Optional, Sequence, Type, TypeGuard, TypeVar
+from typing import Iterable, Optional, Type, TypeGuard, TypeVar
 
 import sqlglot
 import sqlglot.expressions as expressions
@@ -59,7 +59,10 @@ def format_sql(sql_str: str) -> str:
         formatted_exp += expression_ending
         output.append(formatted_exp)
         # check the ast has not changes post formatting
-        formatted_ast_expressions = __parse_statement(formatted_exp)
+        try:
+            formatted_ast_expressions = __parse_statement(formatted_exp)
+        except Exception as err:
+            raise RuntimeError("Failed to parse formatted SQL AST") from err
         if len(formatted_ast_expressions) != 1:
             raise RuntimeError(
                 "Received multiple statements from parsing formatted AST"
@@ -187,8 +190,13 @@ def __with_statements(exps: Iterable[expressions.CTE], col_sep: str) -> str:
         # build line with alias + opening bracket
         opening_clause = cte.alias + " AS ("
         # format the select within brackets
+        cte_select_expression = cte.this
+        if not isinstance(cte_select_expression, expressions.Select):
+            raise RuntimeError(
+                f"CTE expression is not a select expression: {cte_select_expression}"
+            )
         select_statement = __format_select(
-            cte.this,
+            cte_select_expression,
             col_sep=col_sep,
             indent_level=indent_level,
         )
